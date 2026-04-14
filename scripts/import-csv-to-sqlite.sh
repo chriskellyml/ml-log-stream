@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Define variables
-DB_NAME="marklogic_logs.db"
+DB_NAME="${DB_NAME:-marklogic_logs.db}"
 TABLE_NAME_1="logs"
 TABLE_NAME_2="requests"
 CSV_FILE_1="monster-log.csv"

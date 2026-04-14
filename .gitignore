@@ -2,3 +2,7 @@
 *~
 *.log
 dump/
+*.zip
+data/
+load/
+logdir/

@@ -152,12 +152,13 @@ function buildChartData(filePath, seriesLimit) {
     fileName: path.basename(filePath),
     title: `Requests by ${dimension} (${bucketSize})`,
     bucketSize,
+    bucketSizeMinutes: parseBucketSize(bucketSize),
     dimension,
     buckets: bucketOrder,
     axisLabels: computeAxisLabels(bucketOrder),
     series,
     totalRequests,
-    maxValue: Math.max(1, ...series.flatMap((item) => item.values)),
+    maxValue: series.reduce((max, item) => item.values.reduce((m, v) => Math.max(m, v), max), 1),
   };
 }
 
@@ -211,21 +212,30 @@ function splitCsvLine(line) {
 
 function computeAxisLabels(buckets) {
   const parsed = buckets
-    .map((bucket, index) => ({ index, bucket, parts: parseBucket(bucket) }))
-    .filter((item) => item.parts);
+    .map((bucket, index) => {
+      const parts = parseBucket(bucket);
+      const date = parts ? parseBucketDate(bucket) : null;
+      return { index, bucket, parts, date };
+    })
+    .filter((item) => item.parts && item.date);
 
   if (parsed.length === 0) {
     return [];
   }
 
   const intervalMinutes = chooseLabelIntervalMinutes(parsed);
+  const isMultiDay = (parsed[parsed.length - 1].date - parsed[0].date) > 86400000;
+
   const labels = parsed
     .filter((item) => item.parts.second === 0)
     .filter((item) => ((item.parts.hour * 60 + item.parts.minute) % intervalMinutes) === 0)
-    .map((item) => ({
-      index: item.index,
-      label: `${pad(item.parts.hour)}:${pad(item.parts.minute)}`,
-    }));
+    .map((item) => {
+      const timeLabel = `${pad(item.parts.hour)}:${pad(item.parts.minute)}`;
+      const label = isMultiDay
+        ? `${item.date.getMonth() + 1}/${item.date.getDate()} ${timeLabel}`
+        : timeLabel;
+      return { index: item.index, label };
+    });
 
   if (labels.length > 0) {
     return labels;
@@ -245,9 +255,9 @@ function chooseLabelIntervalMinutes(parsedBuckets) {
     return 5;
   }
 
-  const firstMinute = parsedBuckets[0].parts.hour * 60 + parsedBuckets[0].parts.minute;
-  const lastMinute = parsedBuckets[parsedBuckets.length - 1].parts.hour * 60 + parsedBuckets[parsedBuckets.length - 1].parts.minute;
-  const spanMinutes = Math.max(5, lastMinute - firstMinute);
+  const firstDate = parsedBuckets[0].date;
+  const lastDate = parsedBuckets[parsedBuckets.length - 1].date;
+  const spanMinutes = Math.max(5, (lastDate - firstDate) / 60000);
 
   for (const interval of allowed) {
     if (Math.floor(spanMinutes / interval) + 1 <= 20) {
@@ -282,6 +292,27 @@ function formatBucketTime(bucket) {
 
 function pad(value) {
   return String(value).padStart(2, "0");
+}
+
+function parseBucketSize(size) {
+  const match = String(size).match(/^(\d+)([smh])$/);
+  if (!match) {
+    return 60;
+  }
+  const num = Number.parseInt(match[1], 10);
+  const unit = match[2];
+  if (unit === "s") return num;
+  if (unit === "m") return num;
+  if (unit === "h") return num * 60;
+  return num;
+}
+
+function parseBucketDate(bucket) {
+  const d = new Date(bucket);
+  if (isNaN(d)) {
+    return null;
+  }
+  return d;
 }
 
 function bucketRank(bucketSize) {
@@ -477,10 +508,49 @@ function renderHtml(title, charts, target) {
       color: var(--muted);
       font-size: 0.9rem;
     }
+    .focus-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 8px 0 14px;
+      flex-wrap: wrap;
+    }
+    .nav-btn {
+      background: var(--panel-strong);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 14px;
+      font-family: inherit;
+      font-size: 0.95rem;
+      cursor: pointer;
+      color: var(--ink);
+    }
+    .nav-btn:hover:not(:disabled) {
+      border-color: rgba(14, 116, 144, 0.45);
+    }
+    .nav-btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    select {
+      background: var(--panel-strong);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-family: inherit;
+      font-size: 0.95rem;
+      color: var(--ink);
+    }
+    #window-info {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-left: auto;
+    }
     @media (max-width: 700px) {
       main { padding: 18px 14px 28px; }
       .focus { padding: 16px; }
       .row-grid { grid-template-columns: 1fr; }
+      #window-info { width: 100%; margin-left: 0; margin-top: 4px; }
     }
     @media (min-width: 701px) and (max-width: 1100px) {
       .row-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -494,6 +564,16 @@ function renderHtml(title, charts, target) {
     <section class="focus">
       <h2 id="focus-title"></h2>
       <div class="focus-meta" id="focus-meta"></div>
+      <div class="focus-controls">
+        <button id="prev-window" class="nav-btn" disabled>← Previous</button>
+        <select id="window-size">
+          <option value="all">All data</option>
+          <option value="24">1 day</option>
+          <option value="8">8 hours</option>
+        </select>
+        <button id="next-window" class="nav-btn" disabled>Next →</button>
+        <span id="window-info"></span>
+      </div>
       <svg id="focus-chart" viewBox="0 0 1200 620" role="img"></svg>
       <div class="legend" id="legend"></div>
       <div class="hint">Top series by total request count are shown. Remaining series are collapsed into <code>__other__</code>.</div>
@@ -511,6 +591,8 @@ function renderHtml(title, charts, target) {
     const legend = document.getElementById("legend");
     const colors = ["#9a3412", "#0f766e", "#1d4ed8", "#b45309", "#be185d", "#4338ca", "#4d7c0f", "#7c2d12", "#047857"];
     let activeIndex = 0;
+    let focusWindowSize = "all";
+    let focusWindowStart = 0;
 
     const groupedCharts = charts.reduce((acc, chart, index) => {
       const key = chart.bucketSize;
@@ -525,11 +607,11 @@ function renderHtml(title, charts, target) {
       const row = document.createElement("section");
       row.className = "row";
       row.innerHTML = [
-        "<div class=\\"row-header\\">",
-        "<h2 class=\\"row-title\\">" + escapeHtml(bucketSize) + " buckets</h2>",
-        "<div class=\\"row-meta\\">" + items.length + " charts</div>",
+        "<div class=\"row-header\">",
+        "<h2 class=\"row-title\">" + escapeHtml(bucketSize) + " buckets</h2>",
+        "<div class=\"row-meta\">" + items.length + " charts</div>",
         "</div>",
-        "<div class=\\"row-grid\\"></div>"
+        "<div class=\"row-grid\"></div>"
       ].join("");
       const rowGrid = row.querySelector(".row-grid");
 
@@ -540,8 +622,8 @@ function renderHtml(title, charts, target) {
         card.dataset.index = String(index);
         card.innerHTML = [
           "<h2>" + escapeHtml(chart.title) + "</h2>",
-          "<div class=\\"card-meta\\">" + escapeHtml(chart.fileName) + " • total requests: " + chart.totalRequests + "</div>",
-          "<svg class=\\"mini\\" viewBox=\\"0 0 320 150\\" role=\\"img\\"></svg>"
+          "<div class=\"card-meta\">" + escapeHtml(chart.fileName) + " \u2022 total requests: " + chart.totalRequests + "</div>",
+          "<svg class=\"mini\" viewBox=\"0 0 320 150\" role=\"img\"></svg>"
         ].join("");
         rowGrid.appendChild(card);
         renderMini(card.querySelector("svg"), chart);
@@ -551,10 +633,36 @@ function renderHtml(title, charts, target) {
       rowsRoot.appendChild(row);
     });
 
+    document.getElementById("window-size").addEventListener("change", (e) => {
+      focusWindowSize = e.target.value;
+      focusWindowStart = 0;
+      renderFocus(charts[activeIndex]);
+    });
+
+    document.getElementById("prev-window").addEventListener("click", () => {
+      const chart = charts[activeIndex];
+      const bucketMinutes = chart.bucketSizeMinutes || parseBucketSize(chart.bucketSize);
+      const sizeHours = parseInt(focusWindowSize, 10);
+      const bucketsPerWindow = Math.max(1, Math.floor((sizeHours * 60) / bucketMinutes));
+      focusWindowStart = Math.max(0, focusWindowStart - bucketsPerWindow);
+      renderFocus(chart);
+    });
+
+    document.getElementById("next-window").addEventListener("click", () => {
+      const chart = charts[activeIndex];
+      const bucketMinutes = chart.bucketSizeMinutes || parseBucketSize(chart.bucketSize);
+      const sizeHours = parseInt(focusWindowSize, 10);
+      const bucketsPerWindow = Math.max(1, Math.floor((sizeHours * 60) / bucketMinutes));
+      const maxStart = Math.max(0, chart.buckets.length - bucketsPerWindow);
+      focusWindowStart = Math.min(maxStart, focusWindowStart + bucketsPerWindow);
+      renderFocus(chart);
+    });
+
     setActive(0);
 
     function setActive(index) {
       activeIndex = index;
+      focusWindowStart = 0;
       document.querySelectorAll(".card").forEach((card) => {
         card.classList.toggle("active", Number(card.dataset.index) === index);
       });
@@ -571,16 +679,58 @@ function renderHtml(title, charts, target) {
         "total requests: " + chart.totalRequests
       ].map((item) => "<span>" + item + "</span>").join("");
 
-      renderChart(focusChart, chart, true);
+      const windowed = getWindowedChart(chart);
+      renderChart(focusChart, windowed, true);
+      updateWindowInfo(windowed, chart);
       legend.innerHTML = "";
 
       chart.series.forEach((series, index) => {
         const color = colors[index % colors.length];
         const item = document.createElement("div");
         item.className = "legend-item";
-        item.innerHTML = "<span class=\\"swatch\\" style=\\"background:" + color + "\\"></span><span class=\\"legend-label\\">" + escapeHtml(series.name) + " (" + series.total + ")</span>";
+        item.innerHTML = "<span class=\"swatch\" style=\"background:" + color + "\"></span><span class=\"legend-label\">" + escapeHtml(series.name) + " (" + series.total + ")</span>";
         legend.appendChild(item);
       });
+    }
+
+    function updateWindowInfo(windowedChart, fullChart) {
+      const info = document.getElementById("window-info");
+      const prevBtn = document.getElementById("prev-window");
+      const nextBtn = document.getElementById("next-window");
+      if (focusWindowSize === "all") {
+        info.textContent = "";
+        prevBtn.disabled = true;
+        nextBtn.disabled = true;
+        return;
+      }
+      const startText = formatBucketTimeFull(windowedChart.buckets[0]);
+      const endText = formatBucketTimeFull(windowedChart.buckets[windowedChart.buckets.length - 1]);
+      info.textContent = startText + " \u2013 " + endText;
+      const bucketMinutes = fullChart.bucketSizeMinutes || parseBucketSize(fullChart.bucketSize);
+      const sizeHours = parseInt(focusWindowSize, 10);
+      const bucketsPerWindow = Math.max(1, Math.floor((sizeHours * 60) / bucketMinutes));
+      prevBtn.disabled = focusWindowStart <= 0;
+      nextBtn.disabled = focusWindowStart + bucketsPerWindow >= fullChart.buckets.length;
+    }
+
+    function getWindowedChart(chart) {
+      if (focusWindowSize === "all") {
+        return chart;
+      }
+      const sizeHours = parseInt(focusWindowSize, 10);
+      const bucketMinutes = chart.bucketSizeMinutes || parseBucketSize(chart.bucketSize);
+      const bucketsPerWindow = Math.max(1, Math.floor((sizeHours * 60) / bucketMinutes));
+      const maxStart = Math.max(0, chart.buckets.length - bucketsPerWindow);
+      focusWindowStart = Math.min(focusWindowStart, maxStart);
+      const end = Math.min(chart.buckets.length, focusWindowStart + bucketsPerWindow);
+      return {
+        ...chart,
+        buckets: chart.buckets.slice(focusWindowStart, end),
+        series: chart.series.map((s) => ({
+          ...s,
+          values: s.values.slice(focusWindowStart, end)
+        }))
+      };
     }
 
     function renderMini(svg, chart) {
@@ -602,7 +752,7 @@ function renderHtml(title, charts, target) {
 
       const axisColor = interactive ? "#17212b" : "rgba(23, 33, 43, 0.35)";
       const gridColor = interactive ? "rgba(116, 93, 65, 0.18)" : "rgba(116, 93, 65, 0.14)";
-      const axisLabels = interactive ? chart.axisLabels : [];
+      const axisLabels = interactive ? computeAxisLabelsClient(chart.buckets) : [];
 
       const xFor = (index) => {
         if (chart.buckets.length === 1) {
@@ -631,6 +781,21 @@ function renderHtml(title, charts, target) {
 
         addSvg("line", { x1: margin.left, y1: margin.top, x2: margin.left, y2: height - margin.bottom, stroke: axisColor, "stroke-width": "1.2" });
         addSvg("line", { x1: margin.left, y1: height - margin.bottom, x2: width - margin.right, y2: height - margin.bottom, stroke: axisColor, "stroke-width": "1.2" });
+
+        for (let i = 1; i < chart.buckets.length; i += 1) {
+          const prev = new Date(chart.buckets[i - 1]);
+          const curr = new Date(chart.buckets[i]);
+          if (!isNaN(prev) && !isNaN(curr) && prev.getDate() !== curr.getDate()) {
+            const x = xFor(i);
+            addSvg("line", {
+              x1: x, y1: margin.top,
+              x2: x, y2: height - margin.bottom,
+              stroke: "rgba(23, 33, 43, 0.35)",
+              "stroke-width": "2",
+              "stroke-dasharray": "5 5"
+            });
+          }
+        }
 
         axisLabels.forEach(({ index, label }) => {
           const x = xFor(index);
@@ -677,6 +842,48 @@ function renderHtml(title, charts, target) {
       });
     }
 
+    function computeAxisLabelsClient(buckets) {
+      const parsed = buckets.map((b, i) => {
+        const d = new Date(b);
+        return { index: i, date: isNaN(d) ? null : d };
+      }).filter((x) => x.date);
+      if (parsed.length === 0) return [];
+
+      const spanMs = parsed[parsed.length - 1].date - parsed[0].date;
+      const spanHours = spanMs / 3600000;
+      const targetCount = 8;
+      const intervals = [1, 2, 3, 4, 6, 8, 12, 24];
+      let intervalHours = 1;
+      for (const h of intervals) {
+        if (spanHours / h <= targetCount) {
+          intervalHours = h;
+          break;
+        }
+      }
+
+      const isMultiDay = spanMs > 86400000;
+      const labels = [];
+      let lastDayLabel = null;
+
+      for (const p of parsed) {
+        const h = p.date.getHours();
+        const m = p.date.getMinutes();
+        const totalHours = h + m / 60;
+        const mod = totalHours % intervalHours;
+        if (mod < 0.01 || mod > intervalHours - 0.01 || (intervalHours === 24 && h === 0)) {
+          const timeLabel = String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+          const dayLabel = String(p.date.getMonth() + 1) + "/" + String(p.date.getDate());
+          let label = timeLabel;
+          if (isMultiDay && dayLabel !== lastDayLabel) {
+            label = dayLabel + " " + timeLabel;
+            lastDayLabel = dayLabel;
+          }
+          labels.push({ index: p.index, label });
+        }
+      }
+      return labels;
+    }
+
     function onEnter(event) {
       tooltip.innerHTML = escapeHtml(event.target.dataset.series) + "<br>" + escapeHtml(formatBucketTime(event.target.dataset.bucket)) + "<br>requests: " + escapeHtml(event.target.dataset.value);
       tooltip.style.opacity = "1";
@@ -688,12 +895,22 @@ function renderHtml(title, charts, target) {
       tooltip.style.opacity = "0";
     }
 
+    function parseBucketSize(size) {
+      const match = String(size).match(/^(\d+)([smh])$/);
+      if (!match) return 60;
+      const num = parseInt(match[1], 10);
+      const unit = match[2];
+      if (unit === "s") return num;
+      if (unit === "m") return num;
+      if (unit === "h") return num * 60;
+      return num;
+    }
+
     function parseBucket(bucket) {
       const match = String(bucket).match(/(\\d{2}):(\\d{2}):(\\d{2})$/);
       if (!match) {
         return null;
       }
-
       return {
         hour: Number(match[1]),
         minute: Number(match[2]),
@@ -705,8 +922,14 @@ function renderHtml(title, charts, target) {
       if (!parts) {
         return bucket;
       }
-
       return String(parts.hour).padStart(2, "0") + ":" + String(parts.minute).padStart(2, "0");
+    }
+
+    function formatBucketTimeFull(bucket) {
+      const d = new Date(bucket);
+      if (isNaN(d)) return bucket;
+      const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+      return days[d.getDay()] + " " + String(d.getMonth() + 1) + "/" + String(d.getDate()) + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
     }
 
     function escapeHtml(value) {

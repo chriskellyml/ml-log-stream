@@ -2,7 +2,7 @@ SHELL := /bin/bash
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor ingest ingest-latest compact extract load plot sql clean watch-sql
+.PHONY: help doctor ingest ingest-latest compact extract load plot sql clean watch-sql download
 
 help: ## Show available commands
 	@printf "\nML Log Stream\n\n"
@@ -19,6 +19,9 @@ help: ## Show available commands
 	@printf "  make load START=2026-01-01T12:00:00 END=2026-01-01T13:00:00\n\n"
 	@printf "  make plot\n"
 	@printf "  make plot DIR=load/load_2026-01-01T12-00-00_to_2026-01-01T13-00-00 TOP=8\n\n"
+
+download: ## Download logs via MarkLogic eval using qconsole/extract-logs.xqy
+	@bash scripts/download.sh
 
 doctor: ## Check system dependencies and local workspace state
 	@bash scripts/doctor.sh
