@@ -309,10 +309,15 @@ function parseBucketSize(size) {
 
 function parseBucketDate(bucket) {
   const d = new Date(bucket);
-  if (isNaN(d)) {
+  if (!isNaN(d)) {
+    return d;
+  }
+  const m = String(bucket).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})$/);
+  if (!m) {
     return null;
   }
-  return d;
+  const fixed = new Date(m[1], Number(m[2]) - 1, m[3], m[4], m[5], m[6]);
+  return isNaN(fixed) ? null : fixed;
 }
 
 function bucketRank(bucketSize) {
@@ -378,6 +383,25 @@ function renderHtml(title, charts, target) {
       margin: 10px 0 24px;
       color: var(--muted);
       font-size: 1rem;
+    }
+    .time-key {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+    .time-key-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .time-chip {
+      width: 14px;
+      height: 10px;
+      border-radius: 3px;
+      border: 1px solid rgba(23, 33, 43, 0.16);
     }
     .focus {
       background: var(--panel-strong);
@@ -546,11 +570,62 @@ function renderHtml(title, charts, target) {
       font-size: 0.9rem;
       margin-left: auto;
     }
+    .toggle-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.95rem;
+      cursor: pointer;
+      user-select: none;
+    }
+    .toggle-label input {
+      cursor: pointer;
+    }
+    .y-axis-input {
+      width: 100px;
+      background: var(--panel-strong);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-family: inherit;
+      font-size: 0.95rem;
+      color: var(--ink);
+    }
+    .y-axis-input:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .selectors {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      margin-top: 18px;
+    }
+    .selector-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 140px;
+    }
+    .selector-group label {
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+    .selector-group select {
+      background: var(--panel-strong);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-family: inherit;
+      font-size: 0.95rem;
+      color: var(--ink);
+    }
     @media (max-width: 700px) {
       main { padding: 18px 14px 28px; }
       .focus { padding: 16px; }
       .row-grid { grid-template-columns: 1fr; }
       #window-info { width: 100%; margin-left: 0; margin-top: 4px; }
+      .selectors { gap: 12px; }
     }
     @media (min-width: 701px) and (max-width: 1100px) {
       .row-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -559,8 +634,12 @@ function renderHtml(title, charts, target) {
 </head>
 <body>
   <main>
-    <h1>${escapeHtml(title)}</h1>
-    <div class="lede">Source: ${escapeHtml(target.path)}. Click any mini chart to zoom it into the main panel.</div>
+    <div class="lede">Source: ${escapeHtml(target.path)}.</div>
+    <div class="time-key" id="time-key" hidden>
+      <span class="time-key-item"><span class="time-chip" style="background:rgba(14, 116, 144, 0.28)"></span>night</span>
+      <span class="time-key-item"><span class="time-chip" style="background:rgba(77, 124, 15, 0.2)"></span>workday</span>
+      <span class="time-key-item"><span class="time-chip" style="background:rgba(180, 83, 9, 0.28)"></span>evening</span>
+    </div>
     <section class="focus">
       <h2 id="focus-title"></h2>
       <div class="focus-meta" id="focus-meta"></div>
@@ -572,75 +651,129 @@ function renderHtml(title, charts, target) {
           <option value="8">8 hours</option>
         </select>
         <button id="next-window" class="nav-btn" disabled>Next →</button>
+        <label class="toggle-label">
+          <input type="checkbox" id="show-dots" checked>
+          <span>Show dots</span>
+        </label>
+        <label class="toggle-label">
+          <input type="checkbox" id="fixed-y-axis" checked>
+          <span>Fixed Y-axis</span>
+        </label>
+        <input type="number" id="y-axis-max" class="y-axis-input" value="0" min="0">
         <span id="window-info"></span>
       </div>
       <svg id="focus-chart" viewBox="0 0 1200 620" role="img"></svg>
       <div class="legend" id="legend"></div>
       <div class="hint">Top series by total request count are shown. Remaining series are collapsed into <code>__other__</code>.</div>
     </section>
-    <section class="rows" id="rows"></section>
+    <section class="selectors" id="selectors">
+      <div class="selector-group">
+        <label for="dimension-select">Dimension</label>
+        <select id="dimension-select"></select>
+      </div>
+      <div class="selector-group">
+        <label for="resolution-select">Resolution</label>
+        <select id="resolution-select"></select>
+      </div>
+    </section>
   </main>
   <div class="tooltip" id="tooltip"></div>
   <script>
     const charts = ${JSON.stringify(charts)};
     const tooltip = document.getElementById("tooltip");
-    const rowsRoot = document.getElementById("rows");
     const focusTitle = document.getElementById("focus-title");
     const focusMeta = document.getElementById("focus-meta");
     const focusChart = document.getElementById("focus-chart");
     const legend = document.getElementById("legend");
+    const timeKey = document.getElementById("time-key");
+    const dimensionSelect = document.getElementById("dimension-select");
+    const resolutionSelect = document.getElementById("resolution-select");
     const colors = ["#9a3412", "#0f766e", "#1d4ed8", "#b45309", "#be185d", "#4338ca", "#4d7c0f", "#7c2d12", "#047857"];
-    let activeIndex = 0;
+
     let focusWindowSize = "all";
     let focusWindowStart = 0;
 
-    const groupedCharts = charts.reduce((acc, chart, index) => {
-      const key = chart.bucketSize;
-      if (!acc[key]) {
-        acc[key] = [];
-      }
-      acc[key].push({ chart, index });
-      return acc;
-    }, {});
+    const dimensionOrder = ["port", "endpoint", "user", "ip"];
+    const bucketSizeOrder = ["1h", "15m", "5m", "1m", "15s", "5s"];
 
-    Object.entries(groupedCharts).forEach(([bucketSize, items]) => {
-      const row = document.createElement("section");
-      row.className = "row";
-      row.innerHTML = [
-        "<div class=\"row-header\">",
-        "<h2 class=\"row-title\">" + escapeHtml(bucketSize) + " buckets</h2>",
-        "<div class=\"row-meta\">" + items.length + " charts</div>",
-        "</div>",
-        "<div class=\"row-grid\"></div>"
-      ].join("");
-      const rowGrid = row.querySelector(".row-grid");
+    const chartMap = new Map();
+    const dims = new Set();
+    const buckets = new Set();
+    charts.forEach((chart) => {
+      chartMap.set(chart.dimension + "|" + chart.bucketSize, chart);
+      dims.add(chart.dimension);
+      buckets.add(chart.bucketSize);
+    });
 
-      items.forEach(({ chart, index }) => {
-        const card = document.createElement("button");
-        card.type = "button";
-        card.className = "card";
-        card.dataset.index = String(index);
-        card.innerHTML = [
-          "<h2>" + escapeHtml(chart.title) + "</h2>",
-          "<div class=\"card-meta\">" + escapeHtml(chart.fileName) + " \u2022 total requests: " + chart.totalRequests + "</div>",
-          "<svg class=\"mini\" viewBox=\"0 0 320 150\" role=\"img\"></svg>"
-        ].join("");
-        rowGrid.appendChild(card);
-        renderMini(card.querySelector("svg"), chart);
-        card.addEventListener("click", () => setActive(index));
+    const sortedDimensions = [...dims].sort((a, b) => dimensionOrder.indexOf(a) - dimensionOrder.indexOf(b));
+    const sortedBucketSizes = [...buckets].sort((a, b) => bucketSizeOrder.indexOf(a) - bucketSizeOrder.indexOf(b));
+
+    let activeDimension = sortedDimensions[0] || "";
+    let activeBucketSize = sortedBucketSizes[0] || "";
+
+    function populateDimensionSelect() {
+      dimensionSelect.innerHTML = "";
+      sortedDimensions.forEach((dim) => {
+        const opt = document.createElement("option");
+        opt.value = dim;
+        opt.textContent = dim;
+        dimensionSelect.appendChild(opt);
       });
+      dimensionSelect.value = activeDimension;
+    }
 
-      rowsRoot.appendChild(row);
+    function populateResolutionSelect() {
+      resolutionSelect.innerHTML = "";
+      sortedBucketSizes.forEach((size) => {
+        if (chartMap.has(activeDimension + "|" + size)) {
+          const opt = document.createElement("option");
+          opt.value = size;
+          opt.textContent = size;
+          resolutionSelect.appendChild(opt);
+        }
+      });
+      if (chartMap.has(activeDimension + "|" + activeBucketSize)) {
+        resolutionSelect.value = activeBucketSize;
+      } else if (resolutionSelect.options.length > 0) {
+        activeBucketSize = resolutionSelect.options[0].value;
+      }
+    }
+
+    function currentChart() {
+      return chartMap.get(activeDimension + "|" + activeBucketSize);
+    }
+
+    function renderCurrent() {
+      const chart = currentChart();
+      if (!chart) return;
+      renderFocus(chart);
+    }
+
+    populateDimensionSelect();
+    populateResolutionSelect();
+
+    dimensionSelect.addEventListener("change", (e) => {
+      activeDimension = e.target.value;
+      focusWindowStart = 0;
+      populateResolutionSelect();
+      renderCurrent();
+    });
+
+    resolutionSelect.addEventListener("change", (e) => {
+      activeBucketSize = e.target.value;
+      focusWindowStart = 0;
+      renderCurrent();
     });
 
     document.getElementById("window-size").addEventListener("change", (e) => {
       focusWindowSize = e.target.value;
       focusWindowStart = 0;
-      renderFocus(charts[activeIndex]);
+      renderCurrent();
     });
 
     document.getElementById("prev-window").addEventListener("click", () => {
-      const chart = charts[activeIndex];
+      const chart = currentChart();
+      if (!chart) return;
       const bucketMinutes = chart.bucketSizeMinutes || parseBucketSize(chart.bucketSize);
       const sizeHours = parseInt(focusWindowSize, 10);
       const bucketsPerWindow = Math.max(1, Math.floor((sizeHours * 60) / bucketMinutes));
@@ -649,7 +782,8 @@ function renderHtml(title, charts, target) {
     });
 
     document.getElementById("next-window").addEventListener("click", () => {
-      const chart = charts[activeIndex];
+      const chart = currentChart();
+      if (!chart) return;
       const bucketMinutes = chart.bucketSizeMinutes || parseBucketSize(chart.bucketSize);
       const sizeHours = parseInt(focusWindowSize, 10);
       const bucketsPerWindow = Math.max(1, Math.floor((sizeHours * 60) / bucketMinutes));
@@ -658,28 +792,43 @@ function renderHtml(title, charts, target) {
       renderFocus(chart);
     });
 
-    setActive(0);
+    document.getElementById("show-dots").addEventListener("change", (e) => {
+      renderCurrent();
+    });
 
-    function setActive(index) {
-      activeIndex = index;
-      focusWindowStart = 0;
-      document.querySelectorAll(".card").forEach((card) => {
-        card.classList.toggle("active", Number(card.dataset.index) === index);
-      });
-      renderFocus(charts[index]);
-    }
+    const fixedYAxisCheck = document.getElementById("fixed-y-axis");
+    const yAxisMaxInput = document.getElementById("y-axis-max");
+
+    fixedYAxisCheck.addEventListener("change", (e) => {
+      yAxisMaxInput.disabled = !e.target.checked;
+      renderCurrent();
+    });
+
+    yAxisMaxInput.addEventListener("input", () => {
+      renderCurrent();
+    });
+
+    renderCurrent();
 
     function renderFocus(chart) {
       focusTitle.textContent = chart.title;
+
+      const windowed = getWindowedChart(chart);
+      const windowedTotals = windowed.series.map((s) => s.values.reduce((sum, v) => sum + v, 0));
+      const windowedTotalRequests = windowedTotals.reduce((sum, v) => sum + v, 0);
+
       focusMeta.innerHTML = [
         "file: " + escapeHtml(chart.fileName),
         "bucket size: " + escapeHtml(chart.bucketSize),
         "dimension: " + escapeHtml(chart.dimension),
-        "buckets: " + chart.buckets.length,
-        "total requests: " + chart.totalRequests
+        "buckets: " + windowed.buckets.length,
+        "total requests: " + windowedTotalRequests
       ].map((item) => "<span>" + item + "</span>").join("");
 
-      const windowed = getWindowedChart(chart);
+      if (document.activeElement !== yAxisMaxInput) {
+        yAxisMaxInput.value = chart.maxValue || 0;
+      }
+
       renderChart(focusChart, windowed, true);
       updateWindowInfo(windowed, chart);
       legend.innerHTML = "";
@@ -688,9 +837,12 @@ function renderHtml(title, charts, target) {
         const color = colors[index % colors.length];
         const item = document.createElement("div");
         item.className = "legend-item";
-        item.innerHTML = "<span class=\"swatch\" style=\"background:" + color + "\"></span><span class=\"legend-label\">" + escapeHtml(series.name) + " (" + series.total + ")</span>";
+        const total = windowedTotals[index] ?? series.total;
+        item.innerHTML = '<span class="swatch" style="background:' + color + '"></span><span class="legend-label">' + escapeHtml(series.name) + ' (' + total + ')</span>';
         legend.appendChild(item);
       });
+
+      timeKey.hidden = document.getElementById("window-size").value !== "8";
     }
 
     function updateWindowInfo(windowedChart, fullChart) {
@@ -733,10 +885,6 @@ function renderHtml(title, charts, target) {
       };
     }
 
-    function renderMini(svg, chart) {
-      renderChart(svg, chart, false);
-    }
-
     function renderChart(svg, chart, interactive) {
       const width = interactive ? 1200 : 320;
       const height = interactive ? 620 : 150;
@@ -745,7 +893,11 @@ function renderHtml(title, charts, target) {
         : { top: 12, right: 10, bottom: 18, left: 12 };
       const innerWidth = width - margin.left - margin.right;
       const innerHeight = height - margin.top - margin.bottom;
-      const maxY = Math.max(1, ...chart.series.flatMap((series) => series.values));
+      const dynamicMaxY = Math.max(1, chart.series.reduce((max, series) => series.values.reduce((m, v) => Math.max(m, v), max), 0));
+      const fixedMaxY = interactive && document.getElementById("fixed-y-axis").checked
+        ? Math.max(1, Number(document.getElementById("y-axis-max").value) || chart.maxValue || 0)
+        : dynamicMaxY;
+      const maxY = interactive ? fixedMaxY : dynamicMaxY;
 
       svg.innerHTML = "";
       svg.setAttribute("viewBox", "0 0 " + width + " " + height);
@@ -771,6 +923,80 @@ function renderHtml(title, charts, target) {
       };
 
       if (interactive) {
+        const isEightHourView = document.getElementById("window-size").value === "8";
+
+        if (isEightHourView) {
+          const timeColors = {
+            night: "rgba(14, 116, 144, 0.28)",
+            workday: "rgba(77, 124, 15, 0.2)",
+            evening: "rgba(180, 83, 9, 0.28)",
+          };
+
+          const periodAt = (bucket) => {
+            const d = parseDateSafe(bucket);
+            return periodForHour(d ? d.getHours() : 0);
+          };
+
+          if (chart.buckets.length > 0) {
+            let runStart = 0;
+            let runPeriod = periodAt(chart.buckets[0]);
+
+            for (let i = 1; i <= chart.buckets.length; i += 1) {
+              const nextPeriod = i < chart.buckets.length ? periodAt(chart.buckets[i]) : null;
+              if (nextPeriod === runPeriod) {
+                continue;
+              }
+
+              const runEnd = i - 1;
+              const x1 = runStart === 0
+                ? margin.left
+                : (xFor(runStart - 1) + xFor(runStart)) / 2;
+              const x2 = runEnd === chart.buckets.length - 1
+                ? width - margin.right
+                : (xFor(runEnd) + xFor(runEnd + 1)) / 2;
+
+              addSvg("rect", {
+                x: x1,
+                y: margin.top,
+                width: Math.max(0, x2 - x1),
+                height: innerHeight,
+                fill: timeColors[runPeriod],
+                "stroke-width": "0"
+              });
+
+              runStart = i;
+              runPeriod = nextPeriod;
+            }
+          }
+        } else {
+          const dayBands = [];
+          let currentDayStart = 0;
+          let currentDay = parseDateSafe(chart.buckets[0]);
+          for (let i = 1; i < chart.buckets.length; i += 1) {
+            const d = parseDateSafe(chart.buckets[i]);
+            if (d && currentDay && d.getDate() !== currentDay.getDate()) {
+              dayBands.push({ start: currentDayStart, end: i - 1 });
+              currentDayStart = i;
+              currentDay = d;
+            }
+          }
+          dayBands.push({ start: currentDayStart, end: chart.buckets.length - 1 });
+
+          dayBands.forEach((band, bandIndex) => {
+            const x1 = xFor(band.start);
+            const x2 = xFor(band.end);
+            const fill = bandIndex % 2 === 0 ? "rgba(255, 252, 246, 0.45)" : "rgba(240, 235, 225, 0.55)";
+            addSvg("rect", {
+              x: x1,
+              y: margin.top,
+              width: Math.max(0, x2 - x1),
+              height: innerHeight,
+              fill,
+              "stroke-width": "0"
+            });
+          });
+        }
+
         for (let i = 0; i <= 5; i += 1) {
           const value = (maxY / 5) * i;
           const y = yFor(value);
@@ -783,9 +1009,9 @@ function renderHtml(title, charts, target) {
         addSvg("line", { x1: margin.left, y1: height - margin.bottom, x2: width - margin.right, y2: height - margin.bottom, stroke: axisColor, "stroke-width": "1.2" });
 
         for (let i = 1; i < chart.buckets.length; i += 1) {
-          const prev = new Date(chart.buckets[i - 1]);
-          const curr = new Date(chart.buckets[i]);
-          if (!isNaN(prev) && !isNaN(curr) && prev.getDate() !== curr.getDate()) {
+          const prev = parseDateSafe(chart.buckets[i - 1]);
+          const curr = parseDateSafe(chart.buckets[i]);
+          if (prev && curr && prev.getDate() !== curr.getDate()) {
             const x = xFor(i);
             addSvg("line", {
               x1: x, y1: margin.top,
@@ -824,6 +1050,11 @@ function renderHtml(title, charts, target) {
           return;
         }
 
+        const showDots = document.getElementById("show-dots").checked;
+        if (!showDots) {
+          return;
+        }
+
         series.values.forEach((value, index) => {
           const point = addSvg("circle", {
             cx: xFor(index),
@@ -844,8 +1075,8 @@ function renderHtml(title, charts, target) {
 
     function computeAxisLabelsClient(buckets) {
       const parsed = buckets.map((b, i) => {
-        const d = new Date(b);
-        return { index: i, date: isNaN(d) ? null : d };
+        const d = parseDateSafe(b);
+        return { index: i, date: d };
       }).filter((x) => x.date);
       if (parsed.length === 0) return [];
 
@@ -925,9 +1156,24 @@ function renderHtml(title, charts, target) {
       return String(parts.hour).padStart(2, "0") + ":" + String(parts.minute).padStart(2, "0");
     }
 
+    function parseDateSafe(str) {
+      const d = new Date(str);
+      if (!isNaN(d)) return d;
+      const m = String(str).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})$/);
+      if (!m) return null;
+      const fixed = new Date(m[1], Number(m[2]) - 1, m[3], m[4], m[5], m[6]);
+      return isNaN(fixed) ? null : fixed;
+    }
+
+    function periodForHour(hour) {
+      if (hour < 8) return "night";
+      if (hour < 16) return "workday";
+      return "evening";
+    }
+
     function formatBucketTimeFull(bucket) {
-      const d = new Date(bucket);
-      if (isNaN(d)) return bucket;
+      const d = parseDateSafe(bucket);
+      if (!d) return bucket;
       const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
       return days[d.getDay()] + " " + String(d.getMonth() + 1) + "/" + String(d.getDate()) + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
     }
