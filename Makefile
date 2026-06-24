@@ -12,6 +12,8 @@ help: ## Show available commands
 	@printf "\nExamples:\n"
 	@printf "  make doctor\n"
 	@printf "  make download\n"
+	@printf "  make download DAYS=10 TYPES='ErrorLog,AccessLog'\n"
+	@printf "  make download DAYS=2024-08-21 TYPES=ErrorLog PORTS='8000,8010'\n"
 	@printf "  make download DOWNLOADS_DIR=/tmp\n"
 	@printf "  make ingest\n"
 	@printf "  make ingest-latest\n"
@@ -23,7 +25,7 @@ help: ## Show available commands
 	@printf "  make plot DIR=load/load_2026-01-01T12-00-00_to_2026-01-01T13-00-00 TOP=8\n\n"
 
 download: ## Download logs from MarkLogic and save the zip to ~/Downloads
-	@DOWNLOADS_DIR="$(DOWNLOADS_DIR)" bash scripts/download.sh
+	@DOWNLOADS_DIR="$(DOWNLOADS_DIR)" DAYS="$(DAYS)" TYPES="$(TYPES)" PORTS="$(PORTS)" HOSTS="$(HOSTS)" HOSTS_EXCLUDE="$(HOSTS_EXCLUDE)" bash scripts/download.sh
 
 doctor: ## Check system dependencies and local workspace state
 	@bash scripts/doctor.sh

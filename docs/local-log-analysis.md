@@ -59,7 +59,7 @@ To save the zip somewhere else:
 make download DOWNLOADS_DIR=/tmp
 ```
 
-To change what gets exported (days back, log types, ports, hosts), edit the variables at the top of `qconsole/extract-logs.xqy`. The defaults export today's `ErrorLog` files from all hosts and ports.
+To change what gets exported (days back, log types, ports, hosts), pass `make download` options or edit the variables at the top of `qconsole/extract-logs.xqy`. See [Configuring the export](#configuring-the-export) below for details. The defaults export today's `ErrorLog` files from all hosts and ports.
 
 ### Manual alternative
 
@@ -164,3 +164,99 @@ make ingest-latest SKIP='Fine:,Debug:'
 - Keep your SQL queries in `./sql/` so they are easy to re-run and share.
 - Use `make extract START=... END=...` to dump a time window from every timestamped table to NDJSON.
 - Use `make load START=... END=...` followed by `make plot` to build an HTML dashboard of request volume.
+
+## Configuring the export
+
+The export is driven by the variables at the top of `qconsole/extract-logs.xqy`. You can either edit that file directly or pass values to `make download` as environment variables.
+
+### `DAYS`
+
+Controls which days to export.
+
+| Value | Meaning |
+|-------|---------|
+| `0` | Today |
+| `1` | Yesterday |
+| `10` | Ten days ago |
+| `2024-08-21` | A specific date |
+| `0,1,2` | Today plus the previous two days |
+
+Examples:
+
+```bash
+# Just today (default)
+make download
+
+# Yesterday only
+make download DAYS=1
+
+# The last 10 days
+make download DAYS=0,1,2,3,4,5,6,7,8,9
+
+# A specific date
+make download DAYS=2024-08-21
+```
+
+When logs are very large — for example if the server is logging at `Debug` level — it can be safer to download one day at a time rather than asking for a large range in a single export.
+
+### `TYPES`
+
+Controls which log files to include.
+
+| Value | File pattern |
+|-------|--------------|
+| `ErrorLog` | `*_ErrorLog.txt` |
+| `AccessLog` | `*_AccessLog.txt` |
+| `RequestLog` | `*_RequestLog.txt` |
+| `AuditLog` | `*_AuditLog.txt` |
+
+Examples:
+
+```bash
+# Error logs only (default)
+make download
+
+# Error and access logs
+make download TYPES='ErrorLog,AccessLog'
+
+# All log types
+make download TYPES='ErrorLog,AccessLog,RequestLog,AuditLog'
+```
+
+### `PORTS`
+
+Limit the export to specific app-server ports.
+
+```bash
+make download PORTS='8000,8010'
+```
+
+### `HOSTS` and `HOSTS_EXCLUDE`
+
+Limit the export to specific hosts, or exclude specific hosts.
+
+```bash
+make download HOSTS='host1,host2'
+make download HOSTS_EXCLUDE='host-with-too-many-logs'
+```
+
+If both are provided, the include list is applied first and then the exclude list is applied.
+
+### Combining options
+
+```bash
+make download DAYS=10 TYPES='ErrorLog,AccessLog' PORTS='8000,8010'
+```
+
+### Editing `extract-logs.xqy` directly
+
+If you prefer, open `qconsole/extract-logs.xqy` and change the variable declarations directly:
+
+```xquery
+declare variable $DAYS external := (0, 1, 2);
+declare variable $TYPES external := ('ErrorLog', 'AccessLog');
+declare variable $PORT_LIST external := ('8000', '8010');
+```
+
+The `make download` environment variables override these defaults when they are provided.
+

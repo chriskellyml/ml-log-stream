@@ -20,8 +20,8 @@ xquery version "1.0-ml";
  :)
 declare variable $DRY_RUN external := true();
 
-declare variable $DAYS external := (0, '2024-08-21'); (:  or use datestrings e,g, "2023-03-02" :)
-declare variable $TYPES external := ( 'ErrorLog', 'AccessLog', 'RequestLog', 'AuditLog')[1];
+declare variable $DAYS external := 0; (: 0=today, or use date strings like "2024-08-21", or a sequence like (0,1,2) :)
+declare variable $TYPES external := 'ErrorLog'; (: e.g. ('ErrorLog', 'AccessLog', 'RequestLog', 'AuditLog') :)
 declare variable $PORT_LIST external := (); (: e.g. ('8010', '8000') :)
 declare variable $HOST_LIST external := ();
 declare variable $HOST_EXCLUDE_LIST external := ();
@@ -36,8 +36,8 @@ if (xdmp:database-name(xdmp:database()) ne 'Documents') then ("", "Please change
       for $days-ago in $DAYS
       let $days-ago :=
         try {
-          if (xs:string(xdmp:type($days-ago)) eq "integer")
-          then $days-ago
+          if (xs:string(xdmp:type($days-ago)) = ("integer", "double"))
+          then xs:integer($days-ago)
           else
             let $tmp := xs:string(current-date() - xs:date($days-ago))
             let $tmp := replace($tmp, 'PT', '')
