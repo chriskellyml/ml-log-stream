@@ -2,6 +2,8 @@
 
 Stream logs from MarkLogic.
 
+For a step-by-step guide to downloading logs from a MarkLogic environment and analyzing them locally with SQLite, see [docs/local-log-analysis.md](docs/local-log-analysis.md).
+
 ## Usage
 
 The repo now uses `make` directly. No `direnv`, activation script, or shell PATH setup is required.
@@ -16,6 +18,7 @@ Typical commands:
 
 ```bash
 make doctor
+make download
 make ingest
 make ingest-latest
 make extract START=2026-01-01T12:02:02 END=2026-01-01T12:06:08
@@ -37,7 +40,7 @@ make plot
 ## Workflow
 
 1. Run `make doctor`.
-2. Export logs from MarkLogic and download the zip to `~/Downloads`.
+2. Run `make download` (or export logs manually) to get a zip into `~/Downloads`.
 3. Run `make ingest` or `make ingest-latest`.
 4. Create `.sql` files in `./sql/`.
 5. Save SQL files to auto-execute them against `marklogic_logs.db`.
@@ -59,9 +62,13 @@ Optional:
 
 ## Export Logs From MarkLogic
 
-1. Copy [`qconsole/extract-logs.xqy`](qconsole/extract-logs.xqy) into Query Console.
-2. Configure and run the export.
-3. Download the resulting zip file to `~/Downloads`.
+```bash
+make download
+```
+
+This creates the export on the MarkLogic server and saves the zip to `~/Downloads`. See [docs/local-log-analysis.md](docs/local-log-analysis.md) for configuration, ingest, and query instructions.
+
+If you prefer to run the export manually from Query Console, see the comment block at the top of [`qconsole/extract-logs.xqy`](qconsole/extract-logs.xqy).
 
 ## Query Data
 

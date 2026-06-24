@@ -11,6 +11,8 @@ help: ## Show available commands
 	@awk 'BEGIN {FS = ": .*## "}; /^[a-zA-Z0-9_.-]+: .*## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@printf "\nExamples:\n"
 	@printf "  make doctor\n"
+	@printf "  make download\n"
+	@printf "  make download DOWNLOADS_DIR=/tmp\n"
 	@printf "  make ingest\n"
 	@printf "  make ingest-latest\n"
 	@printf "  make ingest LOGFILE=foo.zip SKIP='Fine:,Debug:'\n"
@@ -20,8 +22,8 @@ help: ## Show available commands
 	@printf "  make plot\n"
 	@printf "  make plot DIR=load/load_2026-01-01T12-00-00_to_2026-01-01T13-00-00 TOP=8\n\n"
 
-download: ## Download logs via MarkLogic eval using qconsole/extract-logs.xqy
-	@bash scripts/download.sh
+download: ## Download logs from MarkLogic and save the zip to ~/Downloads
+	@DOWNLOADS_DIR="$(DOWNLOADS_DIR)" bash scripts/download.sh
 
 doctor: ## Check system dependencies and local workspace state
 	@bash scripts/doctor.sh

@@ -18,7 +18,7 @@ xquery version "1.0-ml";
  : OUTPUT: Creates downloadable ZIP file with logs organized by host/date
  : @DEFAULTS:database=Documents
  :)
-declare variable $DRY_RUN := true();
+declare variable $DRY_RUN external := true();
 
 declare variable $DAYS external := (0, '2024-08-21'); (:  or use datestrings e,g, "2023-03-02" :)
 declare variable $TYPES external := ( 'ErrorLog', 'AccessLog', 'RequestLog', 'AuditLog')[1];
